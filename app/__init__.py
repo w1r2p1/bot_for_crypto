@@ -1,11 +1,16 @@
+import app as app
 from flask import Flask, render_template, request
+from flask_migrate import Migrate
+from flask_sqlalchemy import SQLAlchemy
+from flask_marshmallow import Marshmallow
 # 抓 config 當中的物件
 from app.config import config
 import logging
-from telegram import bot, Update
-from telegram.ext import Dispatcher, CommandHandler
+import telebot
 
-# 關於 Flask 設定
+# init Package
+logger = telebot.logger
+telebot.logger.setLevel(logging.INFO)
 app = Flask(__name__)
 
 # Setting Config
@@ -14,38 +19,25 @@ if app.config["ENV"] == "production":
 else:
     app.config.from_object(config['dev'])
 
-# Enable logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Models 關於資料庫
+db = SQLAlchemy(app)
+Migrate = Migrate(app, db)
+ma = Marshmallow(app)
 
-# Init Bot
-bot = bot.Bot(token=app.config['BOT_API_KEY'])
+# init bot
+bot = telebot.TeleBot(token=app.config['BOT_API_KEY'])
 
-
-@app.route('/hook', methods=['POST'])
-def webhook_handler():
-    """Set route /hook with POST method will trigger this method."""
-    if request.method == "POST":
-        update = Update.de_json(request.get_json(force=True), bot)
-        dispatcher.process_update(update)
-    return 'ok'
+@app.route('/' + app.config['BOT_API_KEY'], methods=['POST'])
+def getMessage():
+    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
+    return "!", 200
 
 
-# New a dispatcher for bot
-dispatcher = Dispatcher(bot, None)
+# Connect Telegram bot Webhooks
+@app.route("/")
+def webhook():
+    bot.remove_webhook()
+    bot.set_webhook(url=app.config['BOT_WEBHOOKS_URL'] + app.config['BOT_API_KEY'])
+    return "!", 200
 
-
-def start(update, context):
-    # TODO 這邊很重要 Medium 那篇可能有誤，可能更新了。
-    text = "Hi, Welcome"
-    update.message.reply_text(text)
-
-
-dispatcher.add_handler(CommandHandler('start', start))
-
-
-@app.route("/", defaults={"path": ""})
-@app.route("/<path:path>")
-def catch_all(path):
-    return render_template("index.html"), 404
+from . import commands
